@@ -4,6 +4,8 @@ WORKDIR /app
 
 COPY . /app
 
-RUN RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --upgrade pip
 
-ENTRYPOINT ["top", "-b"]
+RUN pip install --upgrade setuptools && pip install -r requirements.txt
+
+CMD ["pipenv", "run", "python", "Controlnet.py"]
