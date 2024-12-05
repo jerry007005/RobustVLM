@@ -77,6 +77,7 @@ def main(args):
 
     # print args
     print(f"Arguments:\n{'-' * 20}")
+
     for arg, value in vars(args).items():
         print(f"{arg}: {value}")
     print(f"{'-' * 20}")
@@ -84,6 +85,7 @@ def main(args):
     # setup dirs
     if args.overwrite:
         shutil.rmtree(args.output_dir, ignore_errors=True)
+
     os.makedirs(os.path.join(args.output_dir, 'checkpoints'), exist_ok=False)
 
     # write args to file
@@ -91,23 +93,29 @@ def main(args):
         f.write(str(args))
 
     main_device = 0
+
     # get models
     model_orig, _, image_processor = open_clip.create_model_and_transforms(
         args.clip_model_name, pretrained='openai'
     )
+
     if args.optimizer_state != '':
         assert args.start_step > 0
         assert str(args.start_step) in args.optimizer_state
         assert args.pretrained in ['', 'none']
         args.pretrained = args.optimizer_state.replace('_opt', '')
+
     model, _, _ = load_clip_model(args.clip_model_name, args.pretrained)
 
     # Remove the Normalize transform by creating a new Compose object
     preprocessor_without_normalize = transforms.Compose(image_processor.transforms[:-1])
     normalize = image_processor.transforms[-1]
+
     del image_processor
+
     print(f'[preprocessor_without_normalize] {preprocessor_without_normalize}')
     print(f'[normalize] {normalize}')
+
     # preprocessor_without_normalize contains following transforms:
     # - Resize(size=224, interpolation=bicubic, max_size=None, antialias=warn)
     # - CenterCrop(size=(224, 224))
@@ -124,26 +132,32 @@ def main(args):
 
     elif args.dataset == 'segment_anything':
         dataset = SamData('/data/naman_deep_singh/datasets/newSAM', transform=preprocessor_without_normalize)
-
         print(dataset.__len__())
+
     elif args.dataset == 'coco':
+
         if os.path.exists('/mnt/datasets/coco'):
             image_dir_path = '/mnt/datasets/coco/train2017'
             annotations_path = '/mnt/datasets/coco/annotations/captions_train2017.json'
+
         elif os.path.exists('/mnt/lustre'):
             image_dir_path = '/mnt/lustre/hein/cschlarmann37/datasets/coco/train2017'
             annotations_path = '/mnt/lustre/hein/cschlarmann37/datasets/coco/annotations/captions_train2017.json'
+
         else:
             raise ValueError('COCO dataset not found')
+
         dataset = COCOFlickrDataset(
             image_dir_path=image_dir_path,
             annotations_path=annotations_path,
             transform=preprocessor_without_normalize
         )
+
     dataset_eval = ImageNetDataset(
         root=args.imagenet_root + '/val',
         transform=preprocessor_without_normalize,
     )
+
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=8, drop_last=True)
     dataloader_eval = DataLoader(dataset_eval, batch_size=args.batch_size, shuffle=True, num_workers=8, drop_last=True)
 
@@ -154,10 +168,12 @@ def main(args):
         template = 'This is a blurry photo of a {}'
     else:
         raise ValueError(f'Unknown template: {args.template}')
+
     print(f'template: {template}')
     texts = [template.format(c) for c in IMAGENET_1K_CLASS_ID_TO_LABEL.values()]
     text_tokens = open_clip.tokenize(texts)
     model_orig.to(main_device)
+
     with torch.no_grad():
         embedding_text_labels_norm = []
         for el in (text_tokens[:500], text_tokens[500:]):
@@ -181,6 +197,7 @@ def main(args):
 
     model_orig.cpu()
     model_orig = ClipVisionModel(model=model_orig.visual, args=args, normalize=normalize)
+
     if num_gpus > 1:
         model_orig = torch.nn.DataParallel(model_orig)
     model_orig.cuda()
@@ -204,6 +221,7 @@ def main(args):
         )
     else:
         raise ValueError(f'Optimizer {args.optimizer} not supported.')
+
     if args.optimizer_state != '':
         optimizer.load_state_dict(torch.load(args.optimizer_state))
 
@@ -302,6 +320,7 @@ def train_one_epoch(
             reduction='none' if args.attack == 'apgd' else 'mean', loss=args.inner_loss,
             logit_scale=100.
             )
+
         model.eval()
 
         if args.attack == 'pgd':
@@ -331,13 +350,16 @@ def train_one_epoch(
                 n_iter=args.iterations_adv,
                 verbose=True
             )
+
         elif args.attack == 'none':
             data_adv = data
 
         del loss_inner_wrapper
+
         model.train()
 
         embedding_clean = model(data, output_normalize=args.output_normalize)
+
         if args.clean_weight > 0.:
             loss_clean = compute_loss(
                 loss_str=args.loss_clean, embedding=embedding_clean, targets=targets,
@@ -358,6 +380,7 @@ def train_one_epoch(
             embedding_orig=embedding_orig if not args.trades else embedding_clean_no_grad,
             logit_scale=100., embedding_text_labels_norm=embedding_text_labels_norm
             )
+
         loss_total = args.clean_weight * loss_clean + (1 - args.clean_weight) * loss
         loss_total.backward()
         optimizer.step()
@@ -534,6 +557,7 @@ if __name__ == '__main__':
 
     # Parse command-line arguments
     args = parser.parse_args()
+
     args.eps /= 255
     args.stepsize_adv /= 255
     # make sure there is no string in args that should be a bool
@@ -545,6 +569,7 @@ if __name__ == '__main__':
         os.environ['CUDA_VISIBLE_DEVICES'] = args.devices
 
     num_gpus = torch.cuda.device_count()
+
     if num_gpus > 1:
         print(f'Number of GPUs available: {num_gpus}')
     else:
